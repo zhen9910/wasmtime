@@ -6,12 +6,16 @@ use super::{
 use crate::backend::{Id, read};
 use crate::wit::types::{ExecutionTarget, GraphEncoding, Tensor, TensorType};
 use crate::{ExecutionContext, Graph};
-use ort::session::{SessionInputValue, Input, Output, Session};
+use ort::execution_providers::{CPUExecutionProvider, ExecutionProviderDispatch};
 use ort::session::builder::GraphOptimizationLevel;
-use ort::value::{Tensor as OrtTensor, ValueType};
+use ort::session::{Input, Output, Session, SessionInputValue};
 use ort::tensor::TensorElementType;
+use ort::value::{Tensor as OrtTensor, ValueType};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+
+#[cfg(feature = "onnx-cuda")]
+use ort::execution_providers::CUDAExecutionProvider;
 
 #[derive(Default)]
 pub struct OnnxBackend();
@@ -28,9 +32,25 @@ impl BackendInner for OnnxBackend {
             return Err(BackendError::InvalidNumberOfBuilders(1, builders.len()).into());
         }
 
+        // Configure execution providers based on target
+        let execution_providers = configure_execution_providers(target)?;
+
+        tracing::info!(
+            "Configuring ONNX session with {} execution provider(s)",
+            execution_providers.len()
+        );
+
         let session = Session::builder()?
+            .with_execution_providers(execution_providers)?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .commit_from_memory(builders[0])?;
+
+        // Log which execution providers were actually used
+        tracing::info!(
+            "ONNX session created successfully. Model inputs: {}, outputs: {}",
+            session.inputs.len(),
+            session.outputs.len()
+        );
 
         let box_: Box<dyn BackendGraph> =
             Box::new(OnnxGraph(Arc::new(Mutex::new(session)), target));
@@ -39,6 +59,37 @@ impl BackendInner for OnnxBackend {
 
     fn as_dir_loadable<'a>(&'a mut self) -> Option<&'a mut dyn BackendFromDir> {
         Some(self)
+    }
+}
+
+/// Configure execution providers based on the target
+fn configure_execution_providers(
+    target: ExecutionTarget,
+) -> Result<Vec<ExecutionProviderDispatch>, BackendError> {
+    match target {
+        ExecutionTarget::Cpu => {
+            // Use CPU execution provider with default configuration
+            tracing::debug!("Using CPU execution provider");
+            Ok(vec![CPUExecutionProvider::default().build()])
+        }
+        ExecutionTarget::Gpu => {
+            #[cfg(feature = "onnx-cuda")]
+            {
+                // Use CUDA execution provider for GPU acceleration
+                // Fallback to CPU if CUDA initialization fails
+                tracing::info!("Configuring CUDA execution provider for GPU target");
+                Ok(vec![CUDAExecutionProvider::default().build()])
+            }
+            #[cfg(not(feature = "onnx-cuda"))]
+            {
+                Err(BackendError::BackendAccess(anyhow::anyhow!(
+                    "ONNX GPU execution target requested, but 'onnx-cuda' feature is not enabled"
+                )))
+            }
+        }
+        ExecutionTarget::Tpu => {
+            unimplemented!("ONNX TPU execution target is not supported yet");
+        }
     }
 }
 
@@ -179,7 +230,8 @@ impl BackendExecutionContext for OnnxExecutionContext {
                     input_slot.tensor.replace(input.tensor.clone());
                 }
 
-                let session_inputs: Vec<SessionInputValue<'_>> = self.inputs
+                let session_inputs: Vec<SessionInputValue<'_>> = self
+                    .inputs
                     .iter()
                     .map(|i| to_input_value(i))
                     .collect::<Result<Vec<_>, _>>()?;
@@ -208,7 +260,8 @@ impl BackendExecutionContext for OnnxExecutionContext {
 
             // WITX
             None => {
-                let session_inputs: Vec<SessionInputValue<'_>> = self.inputs
+                let session_inputs: Vec<SessionInputValue<'_>> = self
+                    .inputs
                     .iter()
                     .map(|i| to_input_value(i))
                     .collect::<Result<Vec<_>, _>>()?;
@@ -364,11 +417,8 @@ fn to_input_value(slot: &TensorSlot) -> Result<SessionInputValue<'_>, BackendErr
         Some(tensor) => match tensor.ty {
             TensorType::Fp32 => {
                 let data = bytes_to_f32_vec(tensor.data.to_vec());
-                let dimensions: Vec<usize> = tensor
-                    .dimensions
-                    .iter()
-                    .map(|d| *d as usize)
-                    .collect();
+                let dimensions: Vec<usize> =
+                    tensor.dimensions.iter().map(|d| *d as usize).collect();
                 // Create an ort::Tensor and convert to SessionInputValue
                 let ort_tensor = OrtTensor::from_array((&dimensions[..], data.into_boxed_slice()))?;
                 Ok(ort_tensor.into())
