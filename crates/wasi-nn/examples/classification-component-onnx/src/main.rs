@@ -35,7 +35,7 @@ fn get_execution_target() -> ExecutionTarget {
                 return ExecutionTarget::Cpu;
             }
             _ => {
-                println!("Unknown/Unsupported execution target '{}', defaulting to CPU", args[1]);
+                println!("Unknown execution target '{}', defaulting to CPU", args[1]);
             }
         }
     } else {

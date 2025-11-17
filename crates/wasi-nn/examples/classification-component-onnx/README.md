@@ -6,8 +6,7 @@ This example demonstrates how to use the `wasi-nn` crate to run a classification
 It supports CPU and GPU (Nvidia CUDA) execution targets.
 
 **Note:**
-For the wasi-nn GPU execution target, CUDA (onnx-cuda) is the only supported ONNX execution provider (EP).
-TPU execution target is not supported and will fall back to CPU execution.
+GPU execution target only supports Nvidia CUDA (onnx-cuda) as execution provider (EP) for now.
 
 ## Build
 
@@ -27,7 +26,8 @@ cargo build --features component-model,wasi-nn,wasmtime-wasi-nn/onnx-download
 
 #### For GPU (Nvidia CUDA) support:
 ```sh
-cargo build --features component-model,wasi-nn,wasmtime-wasi-nn/onnx-cuda
+# This will automatically download onnxruntime dynamic shared library from cdn.pyke.io
+cargo build --features component-model,wasi-nn,wasmtime-wasi-nn/onnx-cuda,wasmtime-wasi-nn/onnx-download
 ```
 
 ### Running with Different Execution Targets
@@ -46,15 +46,6 @@ Arguments:
     ./crates/wasi-nn/examples/classification-component-onnx/target/wasm32-wasip1/debug/classification-component-onnx.wasm
 ```
 
-Or explicitly specify CPU:
-```sh
-./target/debug/wasmtime run \
-    -Snn \
-    --dir ./crates/wasi-nn/examples/classification-component-onnx/fixture/::fixture \
-    ./crates/wasi-nn/examples/classification-component-onnx/target/wasm32-wasip1/debug/classification-component-onnx.wasm \
-    cpu
-```
-
 #### GPU (CUDA) Execution:
 ```sh
 # path to `libonnxruntime_providers_cuda.so` downloaded by `ort-sys`
@@ -62,12 +53,6 @@ export LD_LIBRARY_PATH={wasmtime_workspace}/target/debug
 
 ./target/debug/wasmtime run \
     -Snn \
-    --dir ./crates/wasi-nn/examples/classification-component-onnx/fixture/::fixture \
-    ./crates/wasi-nn/examples/classification-component-onnx/target/wasm32-wasip1/debug/classification-component-onnx.wasm \
-    gpu
-
-# With debug logging
-WASMTIME_LOG=wasmtime_wasi_nn=debug ./target/debug/wasmtime run -Snn \
     --dir ./crates/wasi-nn/examples/classification-component-onnx/fixture/::fixture \
     ./crates/wasi-nn/examples/classification-component-onnx/target/wasm32-wasip1/debug/classification-component-onnx.wasm \
     gpu
@@ -97,12 +82,3 @@ You can monitor GPU usage using cmd `watch -n 1 nvidia-smi`.
 - NVIDIA GPU with CUDA support
 - CUDA Toolkit 12.x with cuDNN 9.x
 - Build wasmtime with `wasmtime-wasi-nn/onnx-cuda` feature
-
-## Troubleshooting
-
-If you see an error like:
-```
-ONNX GPU execution target requested, but 'onnx-cuda' feature is not enabled
-```
-
-Make sure you've built wasmtime with the appropriate feature flag (see "Building Wasmtime" section above).

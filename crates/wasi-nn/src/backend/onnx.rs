@@ -35,22 +35,10 @@ impl BackendInner for OnnxBackend {
         // Configure execution providers based on target
         let execution_providers = configure_execution_providers(target)?;
 
-        tracing::info!(
-            "Configuring ONNX session with {} execution provider(s)",
-            execution_providers.len()
-        );
-
         let session = Session::builder()?
             .with_execution_providers(execution_providers)?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .commit_from_memory(builders[0])?;
-
-        // Log which execution providers were actually used
-        tracing::info!(
-            "ONNX session created successfully. Model inputs: {}, outputs: {}",
-            session.inputs.len(),
-            session.outputs.len()
-        );
 
         let box_: Box<dyn BackendGraph> =
             Box::new(OnnxGraph(Arc::new(Mutex::new(session)), target));
@@ -76,19 +64,18 @@ fn configure_execution_providers(
             #[cfg(feature = "onnx-cuda")]
             {
                 // Use CUDA execution provider for GPU acceleration
-                // Fallback to CPU if CUDA initialization fails
-                tracing::info!("Configuring CUDA execution provider for GPU target");
+                tracing::debug!("Configuring ONNX Nvidia CUDA execution provider for GPU target");
                 Ok(vec![CUDAExecutionProvider::default().build()])
             }
             #[cfg(not(feature = "onnx-cuda"))]
             {
                 Err(BackendError::BackendAccess(anyhow::anyhow!(
-                    "ONNX GPU execution target requested, but 'onnx-cuda' feature is not enabled"
+                    "GPU execution target is requested, but 'onnx-cuda' feature is not enabled"
                 )))
             }
         }
         ExecutionTarget::Tpu => {
-            unimplemented!("ONNX TPU execution target is not supported yet");
+            unimplemented!("TPU execution target is not supported for ONNX backend yet");
         }
     }
 }
